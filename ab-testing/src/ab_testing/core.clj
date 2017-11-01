@@ -1,5 +1,6 @@
 (ns ab-testing.core
-  (:gen-class))
+  (:gen-class)
+  (:require [cheshire.core :as json]))
 
 (defn- state->conversion-rates [{:keys [buckets statistics]}]
   (map (fn [bucket-name]
@@ -32,7 +33,33 @@
   (swap! state update-in [:statistics bucket :conversions] inc)
   bucket)
 
-(defn -main
-  "I don't do a whole lot ... yet."
-  [& args]
-  (println "Hello," " World!"))
+(defn route-request [{:keys [body uri request-method] :as request}]
+  (case [request-method uri]
+    [:post "/api/allocate"]
+    {:status 201
+     :body {:bucket (allocate-bucket (rand))}}
+
+    [:post "/api/conversion"]
+    {:status 201
+     :body {:bucket (record-conversion (:bucket body))}}
+
+    {:status 404
+     :body (str request-method " " uri " not found")}))
+
+(defn- wrap-format-json-response [f]
+  (fn [request]
+    (let [{:keys [body] :as response} (f request)]
+      (if (map? body)
+        (assoc response :body (json/encode body))
+        response))))
+
+(defn- wrap-parse-json-input [f]
+  (fn [{:keys [body headers] :as request}]
+    (if (= "application/json" (get headers "content-type"))
+      (f (assoc request :body (-> body slurp json/decode)))
+      (f request))))
+
+(def ring-handler
+  (-> route-request
+      wrap-format-json-response
+      wrap-parse-json-input))
