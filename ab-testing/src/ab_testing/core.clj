@@ -1,5 +1,4 @@
 (ns ab-testing.core
-  (:gen-class)
   (:require [cheshire.core :as json]))
 
 (defn- state->conversion-rates [{:keys [buckets statistics]}]
@@ -43,20 +42,26 @@
     {:status 201
      :body {:bucket (record-conversion (:bucket body))}}
 
+    ([:get "/"] [:get "/api/statistics"])
+    {:status 200
+     :body {:statistics (:statistics @state)}}
+
     {:status 404
      :body (str request-method " " uri " not found")}))
 
 (defn- wrap-format-json-response [f]
   (fn [request]
     (let [{:keys [body] :as response} (f request)]
-      (if (map? body)
-        (assoc response :body (json/encode body))
+      (if (coll? body)
+        (-> response
+            (update :body json/encode)
+            (assoc-in [:headers "Content-Type"] "application/json"))
         response))))
 
 (defn- wrap-parse-json-input [f]
   (fn [{:keys [body headers] :as request}]
     (if (= "application/json" (get headers "content-type"))
-      (f (assoc request :body (-> body slurp json/decode)))
+      (f (assoc request :body (-> body slurp (json/decode keyword))))
       (f request))))
 
 (def ring-handler
