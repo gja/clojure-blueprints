@@ -1,12 +1,20 @@
+(ns log-processing.custom-transducer)
+
 (ns log-processing.transducer
   (:import [java.io PrintWriter InputStream])
   (:require [log-processing.list-files :as list-files]
             [log-processing.get-records :as records]))
 
-(def records-transform
-  (comp
-   (filter #(= "allocation" (:type %)))
-   (map :country)))
+(defn records-transform [xf]
+  (fn
+    ([]
+     (xf))
+    ([result]
+     (xf result))
+    ([result next]
+     (if (= "allocation" (:type next))
+       (xf result (:country next))
+       result))))
 
 (defn- process-single-file [bucket object]
   (->> object
@@ -15,11 +23,22 @@
                   (fn
                     ([x]
                      (.println ^PrintWriter *err* (str "Done Processing: " object))
-                     (persistent! x)
-                     x)
+                     (persistent! x))
                     ([acc country]
                      (assoc! acc country (inc (get acc country 0)))))
                   (transient {}))))
+
+(defn- repeated-ditto [xf]
+  (let [current-item (atom nil)]
+    (fn
+      ([]
+       (xf))
+      ([result]
+       (-> result (xf "done") (xf "done")))
+      ([result next]
+       (if (= @current-item next)
+         (xf result "ditto")
+         (xf result (reset! current-item next)))))))
 
 (defn count-number-of-allocations-by-country [bucket prefix]
   (->> prefix
